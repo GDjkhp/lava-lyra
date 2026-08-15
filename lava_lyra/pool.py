@@ -108,6 +108,13 @@ class Node:
 
     _LATENCY_CACHE_TTL: ClassVar[float] = 5.0
 
+    _RECOMMENDATION_SEARCH_TYPES: ClassVar[dict[TrackType, SearchType]] = {
+        TrackType.SPOTIFY: SearchType.sprec,
+        TrackType.DEEZER: SearchType.dzrec,
+        TrackType.TIDAL: SearchType.tdrec,
+        TrackType.JIOSAAVN: SearchType.jsrec,
+    }
+
     def __init__(
         self,
         *,
@@ -1125,7 +1132,7 @@ class Node:
         Gets recommendations for a track.
 
         In Lavalink v4, recommendations are handled by plugins.
-        For Spotify tracks, use the 'sprec:' search prefix.
+        For Spotify/Deezer/Tidal/JioSaavn tracks, use the matching '*rec:' search prefix.
         For YouTube tracks, use the autoplay/radio playlist.
 
         Args:
@@ -1138,27 +1145,26 @@ class Node:
         if track is None:
             raise TypeError("get_recommendations() requires a track, got None.")
 
-        if track.track_type == TrackType.SPOTIFY:
-            # Use Spotify recommendations via LavaSrc plugin
-            return await self.get_tracks(
-                query=track.identifier,
-                search_type=SearchType.sprec,
-                ctx=ctx,
-            )
-
-        elif track.track_type == TrackType.YOUTUBE or track.track_type == TrackType.YOUTUBE_MUSIC:
-            # Use YouTube autoplay/radio playlist
+        if track.track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
             return await self.get_tracks(
                 query=f"https://www.youtube.com/watch?v={track.identifier}&list=RD{track.identifier}",
                 search_type=SearchType.ytsearch,
                 ctx=ctx,
             )
 
-        else:
+        search_type = self._RECOMMENDATION_SEARCH_TYPES.get(track.track_type)
+        if search_type is None:
             raise TrackLoadError(
-                "Recommendations are only supported for Spotify and YouTube tracks. "
-                "Make sure the appropriate plugins are installed on your Lavalink server.",
+                "Recommendations are only supported for Spotify, Deezer, Tidal, "
+                "JioSaavn, and YouTube tracks. Make sure the appropriate plugins "
+                "are installed on your Lavalink server.",
             )
+
+        return await self.get_tracks(
+            query=track.identifier,
+            search_type=search_type,
+            ctx=ctx,
+        )
 
     async def load_search(
         self,

@@ -42,6 +42,9 @@ class SearchType(Enum):
     spsearch = "spsearch"
     bilisearch = "bilisearch"
     sprec = "sprec"
+    dzrec = "dzrec"
+    tdrec = "tdrec"
+    jsrec = "jsrec"
     other = "other"
 
     @classmethod
