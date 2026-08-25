@@ -1,8 +1,8 @@
 ```{eval-rst}
-Search Module
---------------------
+Compat
+-------------------
 
-.. automodule:: lava_lyra.search
+.. automodule:: lava_lyra.compat
    :members:
    :undoc-members:
    :show-inheritance:

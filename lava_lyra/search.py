@@ -121,27 +121,27 @@ class SearchManager:
             ValueError: If no search types are specified
 
         Example:
-            ```python
-            # Search YouTube for tracks and albums
-            result = await search_manager.load_search(
-                query="architects animals",
-                types=[LavaSearchType.TRACK, LavaSearchType.ALBUM],
-                search_type=SearchType.ytsearch,
-                ctx=ctx
-            )
+            ::
 
-            # Search Spotify
-            result = await search_manager.load_search(
-                query="metallica",
-                types=[LavaSearchType.TRACK, LavaSearchType.ARTIST],
-                search_type=SearchType.spsearch,
-                ctx=ctx
-            )
+                # Search YouTube for tracks and albums
+                result = await node.load_search(
+                    query="architects animals",
+                    types=[LavaSearchType.TRACK, LavaSearchType.ALBUM],
+                    search_type=SearchType.ytsearch,
+                    ctx=ctx
+                )
 
-            if result:
-                print(f"Found {len(result.tracks)} tracks")
-                print(f"Found {len(result.albums)} albums")
-            ```
+                # Search Spotify
+                result = await node.load_search(
+                    query="metallica",
+                    types=[LavaSearchType.TRACK, LavaSearchType.ARTIST],
+                    search_type=SearchType.spsearch,
+                    ctx=ctx
+                )
+
+                if result:
+                    print(f"Found {len(result.tracks)} tracks")
+                    print(f"Found {len(result.albums)} albums")
         """
         # Check if LavaSearch is enabled for this node
         if not self._node._search_enabled:

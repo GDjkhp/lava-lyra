@@ -8,6 +8,8 @@ from typing import Any
 sys.path.insert(0, os.path.abspath("."))
 sys.path.insert(0, os.path.abspath(".."))
 
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 project = "Lyra"
 copyright = "2026, ParrotXray"
@@ -22,7 +24,18 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.linkcode",
+    "sphinx.ext.napoleon",
     "myst_parser",
+]
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_include_init_with_doc = True
+napoleon_use_rtype = False
+napoleon_use_ivar = True
+napoleon_custom_sections = [
+    ("Health Monitor Parameters", "params_style"),
+    ("Connection Timeout Parameters", "params_style"),
 ]
 
 myst_enable_extensions = [
@@ -42,8 +55,6 @@ myst_enable_extensions = [
 
 myst_heading_anchors = 3
 
-
-templates_path = ["_templates"]
 
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
@@ -116,7 +127,11 @@ def linkcode_resolve(domain: str, info: dict[str, Any]) -> str | None:
             return None
         if file is None:
             return None
-        file = os.path.relpath(file, os.path.abspath(".."))
+
+        file = os.path.relpath(file, ROOT_DIR)
+        if file.startswith("..") or not file.startswith("lava_lyra" + os.sep):
+            return None
+
         start, end = lines[1], lines[1] + len(lines[0]) - 1
 
         return f"https://github.com/ParrotXray/lava-lyra/blob/main/{file}#L{start}-L{end}"

@@ -2,7 +2,14 @@
 
 If you want a quick example on how to get started with Lyra, look below:
 
-## py-cord
+:::{note}
+
+These examples connect to a Lavalink v4 node, but `NodePool.create_node()` works identically
+against a NodeLink v3 instance — just point `host`/`port` at it instead.
+
+:::
+
+## Py-cord
 
 ```py
 import lava_lyra
@@ -26,10 +33,8 @@ class Music(discord.Cog):
     def __init__(self, bot: discord.Bot) -> None:
         self.bot = bot
 
-        self.pool = lava_lyra.NodePool()
-
     async def start_nodes(self) -> None:
-        await self.pool.create_node(
+        await lava_lyra.NodePool.create_node(
             bot=self.bot,
             host="127.0.0.1",
             port=2333,
@@ -77,20 +82,23 @@ bot = MyBot()
 bot.run("token here")
 ```
 
-## discord.py
+## Discord.py
 
 ```py
 import lava_lyra
 import discord
-import re
 
 from discord.ext import commands
 
 
 class MyBot(commands.Bot):
     def __init__(self) -> None:
+        intents = discord.Intents.default()
+        intents.message_content = True
+
         super().__init__(
             command_prefix="!",
+            intents=intents,
             activity=discord.Activity(type=discord.ActivityType.listening, name="to music!"),
         )
 
@@ -105,10 +113,8 @@ class Music(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-        self.pool = lava_lyra.NodePool()
-
     async def start_nodes(self) -> None:
-        await self.pool.create_node(
+        await lava_lyra.NodePool.create_node(
             bot=self.bot,
             host="127.0.0.1",
             port=2333,
@@ -127,7 +133,7 @@ class Music(commands.Cog):
                     "without specifying the channel argument."
                 )
 
-        await ctx.author.voice.channel.connect(cls=lava_lyra.Player)
+        await channel.connect(cls=lava_lyra.Player)
         await ctx.send(f"Joined the voice channel `{channel}`")
 
     @commands.command(name="play")
@@ -153,7 +159,6 @@ bot.run("token here")
 ```
 
 :::{note}
-Platform support (Spotify, Apple Music, etc.) is handled entirely by your Lavalink
-server's plugins. No API credentials are needed in Lyra itself — configure them in
-your `application.yml` instead.
+Platform support (Spotify, Apple Music, etc.) is handled server-side by your Lavalink
+plugins, not by Lyra — see the [FAQ](faq.md) for details.
 :::

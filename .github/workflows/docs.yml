@@ -1,25 +1,30 @@
-name: Type Check
+name: Docs Build
 
 on:
   pull_request:
     types: [opened, synchronize]
+    paths:
+      - "docs/**"
+      - "lava_lyra/**"
   push:
     branches: [main]
+    paths:
+      - "docs/**"
+      - "lava_lyra/**"
   workflow_dispatch:
 
 concurrency:
-  group: typecheck-${{ github.event.pull_request.number || github.ref }}
+  group: docs-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  pyrefly:
+  sphinx:
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         extra: ["discord.py", "py-cord"]
-        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
     - name: Checkout code
@@ -28,21 +33,20 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.12"
 
     - name: Cache pip packages
       uses: actions/cache@v5
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-pyrefly-${{ matrix.extra }}-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+        key: ${{ runner.os }}-pip-docs-${{ matrix.extra }}-${{ hashFiles('pyproject.toml') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        pip install -e ".[${{ matrix.extra }}]"
-        pip install pyrefly
+        pip install -e ".[docs,${{ matrix.extra }}]"
 
-    - name: Run pyrefly
-      run: pyrefly check .
+    - name: Build docs
+      run: sphinx-build -W docs docs/_build/html

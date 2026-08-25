@@ -50,7 +50,7 @@ class Lyrics:
     def _parse_data(self, data: dict[str, Any]) -> None:
         """Parse lyrics data from different formats"""
         # NodeLink format
-        if data.get("loadType") == "lyrics" and "data" in data:
+        if data.get("loadType") == "lyrics" and data.get("data") is not None:
             lyrics_data = data["data"]
             self.name = lyrics_data.get("name")
             self.synced = lyrics_data.get("synced", False)
@@ -167,13 +167,6 @@ class LyricsManager:
         if self._log:
             self._log.debug("Lyrics state has been reset")
 
-    def update_lyrics(self, data: dict[str, Any]) -> None:
-        """Update lyrics data"""
-        self._lyrics = Lyrics(data)
-        self._lyrics_loaded = True
-        if self._log:
-            self._log.debug(f"Lyrics updated: {len(self._lyrics.lines)} lines")
-
     def mark_not_found(self) -> None:
         """Mark lyrics as not found"""
         self._lyrics = None
@@ -188,7 +181,7 @@ class LyricsManager:
 
         Args:
             track: Track object (default: current track)
-            skip_track_source: Skip track source when searching (NodeLink only)
+            skip_track_source: Skip track source when searching (Lavalink v4 only)
             lang: Language code for YouTube captions (NodeLink only)
 
         Returns:

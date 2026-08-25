@@ -35,7 +35,6 @@ __all__ = (
     "VolumeChangedEvent",
     "WebSocketClosedEvent",
     "WebSocketClosedPayload",
-    "WebSocketOpenEvent",
 )
 
 
@@ -43,23 +42,27 @@ class LyraEvent(ABC):
     """The base class for all events dispatched by a node.
 
     Every event must be formatted within your bot's code as a listener.
-    For example, to listen for when a track starts.
+    For example, to listen for when a track starts. Each event's
+    `handler_args` determine the positional arguments your listener
+    receives — for `on_lyra_track_start`, that's `(player, track)`.
 
     py-cord::
 
         @bot.listen()
-        async def on_lyra_track_start(self, event):
+        async def on_lyra_track_start(player, track):
             pass
 
     discord.py::
 
         @bot.event
-        async def on_lyra_track_start(event):
+        async def on_lyra_track_start(player, track):
             pass
     """
 
+    __slots__ = ("handler_args",)
+
     name = "event"
-    handler_args: tuple[Any, ...] = ()
+    handler_args: tuple[Any, ...]
 
     def dispatch(self, bot: BotType) -> None:
         bot.dispatch(f"lyra_{self.name}", *self.handler_args)
@@ -81,7 +84,6 @@ class TrackStartEvent(LyraEvent):
         self.player: Player = player
         self.track: Track | None = self.player._current
 
-        # on_lyra_track_start(player, track)
         self.handler_args = self.player, self.track
 
     def __repr__(self) -> str:
@@ -102,20 +104,19 @@ class TrackEndEvent(LyraEvent):
         self.track: Track | None = self.player._ending_track
         self.reason: str = data.get("reason", "")
 
-        # on_lyra_track_end(player, track, reason)
         self.handler_args = self.player, self.track, self.reason
 
     def __repr__(self) -> str:
         return (
-            f"<Lyra.TrackEndEvent player={self.player!r} track_id={self.track!r} "
-            f"reason={self.reason!r}>"
+            f"<Lyra.TrackEndEvent player={self.player!r} "
+            f"track_id={self.track.track_id if self.track else None!r} reason={self.reason!r}>"
         )
 
 
 class TrackStuckEvent(LyraEvent):
     """Fired when a track is stuck and cannot be played. Returns the player
-    associated with the event along with the lyra.Track object
-    to be further parsed by the end user.
+    associated with the event along with the lyra.Track object and the
+    threshold in milliseconds that was exceeded.
     """
 
     name = "track_stuck"
@@ -127,7 +128,6 @@ class TrackStuckEvent(LyraEvent):
         self.track: Track | None = self.player._ending_track
         self.threshold: float = data.get("thresholdMs", 0)
 
-        # on_lyra_track_stuck(player, track, threshold)
         self.handler_args = self.player, self.track, self.threshold
 
     def __repr__(self) -> str:
@@ -138,6 +138,11 @@ class TrackStuckEvent(LyraEvent):
 
 
 class TrackExceptionPayload:
+    """Exception details from a `TrackExceptionEvent`: `message`, Lavalink's
+    `severity` classification (`COMMON`/`SUSPICIOUS`/`FAULT`), and the
+    underlying `cause`, when Lavalink provides one.
+    """
+
     __slots__ = ("cause", "message", "severity")
 
     def __init__(
@@ -158,8 +163,9 @@ class TrackExceptionPayload:
 
 
 class TrackExceptionEvent(LyraEvent):
-    """Fired when a track error has occured.
-    Returns the player associated with the event along with the error code and exception.
+    """Fired when a track error has occurred.
+    Returns the player associated with the event along with the track and a
+    TrackExceptionPayload describing the message, severity, and cause.
     """
 
     name = "track_exception"
@@ -179,7 +185,6 @@ class TrackExceptionEvent(LyraEvent):
         else:
             self.exception = TrackExceptionPayload(message=str(raw_exception))
 
-        # on_lyra_track_exception(player, track, error)
         self.handler_args = self.player, self.track, self.exception
 
     def __repr__(self) -> str:
@@ -187,6 +192,11 @@ class TrackExceptionEvent(LyraEvent):
 
 
 class WebSocketClosedPayload:
+    """Details from a `WebSocketClosedEvent`. `guild` is resolved lazily
+    from the bot's cache on access, and is `None` if uncached.
+    `by_remote` is whether Discord's voice servers closed the connection.
+    """
+
     __slots__ = ("_bot", "_guild_id", "by_remote", "code", "reason")
 
     def __init__(self, data: dict[str, Any], bot: BotType | None = None):
@@ -198,8 +208,8 @@ class WebSocketClosedPayload:
 
     @property
     def guild(self) -> GuildType | None:
-        """Returns the guild associated with this event.
-        Lazily fetches the guild to avoid circular imports.
+        """Returns the guild associated with this event, resolved lazily
+        from the bot's cache. Returns `None` if uncached.
         """
         if self._bot is None:
             return None
@@ -213,8 +223,10 @@ class WebSocketClosedPayload:
 
 
 class WebSocketClosedEvent(LyraEvent):
-    """Fired when a websocket connection to a node has been closed.
-    Returns the reason and the error code.
+    """Fired when the Discord voice websocket for a guild has been closed
+    (relayed by the node, not the node's own connection).
+    Returns a WebSocketClosedPayload with the guild, close code, reason,
+    and whether the close was remote.
     """
 
     name = "websocket_closed"
@@ -226,31 +238,10 @@ class WebSocketClosedEvent(LyraEvent):
         bot = getattr(player, "_bot", None)
         self.payload: WebSocketClosedPayload = WebSocketClosedPayload(data, bot)
 
-        # on_lyra_websocket_closed(payload)
         self.handler_args = (self.payload,)
 
     def __repr__(self) -> str:
-        return f"<Lyra.WebsocketClosedEvent payload={self.payload!r}>"
-
-
-class WebSocketOpenEvent(LyraEvent):
-    """Fired when a websocket connection to a node has been initiated.
-    Returns the target and the session SSRC.
-    """
-
-    name = "websocket_open"
-
-    __slots__ = ("ssrc", "target")
-
-    def __init__(self, data: dict[str, Any], _: Any) -> None:
-        self.target: str = data.get("target", "")
-        self.ssrc: int = data.get("ssrc", 0)
-
-        # on_lyra_websocket_open(target, ssrc)
-        self.handler_args = self.target, self.ssrc
-
-    def __repr__(self) -> str:
-        return f"<Lyra.WebsocketOpenEvent target={self.target!r} ssrc={self.ssrc!r}>"
+        return f"<Lyra.WebSocketClosedEvent payload={self.payload!r}>"
 
 
 class LyricsFoundEvent(LyraEvent):
@@ -265,7 +256,6 @@ class LyricsFoundEvent(LyraEvent):
         self.track: Track | None = player._current
         self.lyrics: Lyrics = Lyrics(data)
 
-        # on_lyra_lyrics_found(player, track, lyrics)
         self.handler_args = self.player, self.track, self.lyrics
 
     def __repr__(self) -> str:
@@ -283,7 +273,6 @@ class LyricsNotFoundEvent(LyraEvent):
         self.player: Player = player
         self.track: Track | None = player._current
 
-        # on_lyra_lyrics_unavailable(player, track)
         self.handler_args = self.player, self.track
 
     def __repr__(self) -> str:
@@ -295,13 +284,12 @@ class LyricsLineEvent(LyraEvent):
 
     name = "lyrics_line"
 
-    __slots__ = ("line", "player", "track")
+    __slots__ = ("line", "line_index", "player", "skipped", "track")
 
     def __init__(self, data: dict[str, Any], player: Player):
         self.player: Player = player
         self.track: Track | None = player._current
 
-        # Create a lyric line object
         line_data: dict[str, Any] = data.get("line", {})
         if not isinstance(line_data, dict):
             line_data = {}
@@ -314,8 +302,9 @@ class LyricsLineEvent(LyraEvent):
             time=(line_data.get("timestamp", line_data.get("time", 0)) or 0) / 1000.0,
             duration=(raw_duration / 1000.0) if raw_duration else None,
         )
+        self.line_index: int | None = data.get("lineIndex")
+        self.skipped: bool = bool(data.get("skipped", False))
 
-        # on_lyra_lyrics_update(player, track, line)
         self.handler_args = self.player, self.track, self.line
 
     def __repr__(self) -> str:
@@ -323,8 +312,9 @@ class LyricsLineEvent(LyraEvent):
 
 
 class NodeConnectedEvent(LyraEvent):
-    """Fired when a node successfully connects to Lavalink.
-    Returns the node identifier and whether this is a reconnection.
+    """Fired when a node successfully connects to Lavalink or NodeLink.
+    Returns the node identifier, whether the node is a NodeLink instance,
+    and whether this is a reconnection.
     """
 
     name = "node_connected"
@@ -336,7 +326,6 @@ class NodeConnectedEvent(LyraEvent):
         self.is_nodelink: bool = is_nodelink
         self.reconnect: bool = reconnect
 
-        # on_lyra_node_connected(node_id, is_nodelink, reconnect)
         self.handler_args = self.node_id, self.is_nodelink, self.reconnect
 
     def __repr__(self) -> str:
@@ -344,8 +333,9 @@ class NodeConnectedEvent(LyraEvent):
 
 
 class NodeDisconnectedEvent(LyraEvent):
-    """Fired when a node disconnects from Lavalink.
-    Returns the node identifier and the number of players that were affected.
+    """Fired when a node disconnects from Lavalink or NodeLink.
+    Returns the node identifier, whether the node is a NodeLink instance,
+    and the number of players that were affected.
     """
 
     name = "node_disconnected"
@@ -357,7 +347,6 @@ class NodeDisconnectedEvent(LyraEvent):
         self.is_nodelink: bool = is_nodelink
         self.player_count: int = player_count
 
-        # on_lyra_node_disconnected(node_id, is_nodelink, player_count)
         self.handler_args = self.node_id, self.is_nodelink, self.player_count
 
     def __repr__(self) -> str:
@@ -365,8 +354,9 @@ class NodeDisconnectedEvent(LyraEvent):
 
 
 class NodeReconnectingEvent(LyraEvent):
-    """Fired when a node is attempting to reconnect to Lavalink.
-    Returns the node identifier and the retry delay in seconds.
+    """Fired when a node is attempting to reconnect to Lavalink or NodeLink.
+    Returns the node identifier, whether the node is a NodeLink instance,
+    and the retry delay in seconds.
     """
 
     name = "node_reconnecting"
@@ -378,7 +368,6 @@ class NodeReconnectingEvent(LyraEvent):
         self.is_nodelink: bool = is_nodelink
         self.retry_in: float = retry_in
 
-        # on_lyra_node_reconnecting(node_id, is_nodelink, retry_in)
         self.handler_args = self.node_id, self.is_nodelink, self.retry_in
 
     def __repr__(self) -> str:
@@ -396,7 +385,6 @@ class PlayerCreatedEvent(LyraEvent):
         self.player: Player = player
         self.guild_id: int = int(data.get("guildId", 0))
 
-        # on_lyra_player_created(player, guild_id)
         self.handler_args = self.player, self.guild_id
 
     def __repr__(self) -> str:
@@ -414,7 +402,6 @@ class VolumeChangedEvent(LyraEvent):
         self.player: Player = player
         self.volume: int = data.get("volume", 100)
 
-        # on_lyra_volume_changed(player, volume)
         self.handler_args = self.player, self.volume
 
     def __repr__(self) -> str:
@@ -432,7 +419,6 @@ class PlayerConnectedEvent(LyraEvent):
         self.player: Player = player
         self.voice: dict[str, Any] = data.get("voice", {})
 
-        # on_lyra_player_connected(player, voice)
         self.handler_args = self.player, self.voice
 
     def __repr__(self) -> str:
@@ -450,7 +436,6 @@ class FiltersChangedEvent(LyraEvent):
         self.player: Player = player
         self.filters: dict[str, Any] = data.get("filters", {})
 
-        # on_lyra_filters_changed(player, filters)
         self.handler_args = self.player, self.filters
 
     def __repr__(self) -> str:
@@ -458,7 +443,7 @@ class FiltersChangedEvent(LyraEvent):
 
 
 class PauseEvent(LyraEvent):
-    """Fired when player is paused (NodeLink specific)"""
+    """Fired when the player is paused or resumed (NodeLink specific)"""
 
     name = "pause"
     __slots__ = ("paused", "player")
@@ -500,7 +485,7 @@ class MixStartedEvent(LyraEvent):
     Attributes:
         player: The player instance
         mix_id: Unique identifier for this mix layer
-        track: The track being mixed in
+        track: The track being mixed in (or None)
         volume: Volume level of the mix layer (0.0 - 1.0)
     """
 
@@ -524,7 +509,6 @@ class MixStartedEvent(LyraEvent):
         else:
             self.track = None
 
-        # on_lyra_mix_started(player, mix_id, track, volume)
         self.handler_args = (self.player, self.mix_id, self.track, self.volume)
 
     def __repr__(self) -> str:
@@ -560,7 +544,6 @@ class MixEndedEvent(LyraEvent):
         self.mix_id: str = data.get("mixId", "")
         self.reason: MixEndReason = MixEndReason(data.get("reason", "FINISHED"))
 
-        # on_lyra_mix_ended(player, mix_id, reason)
         self.handler_args = (self.player, self.mix_id, self.reason)
 
     @property

@@ -1,7 +1,7 @@
 """
 Lyra
 ~~~~
-A modern Lavalink v4 wrapper designed for py-cord.
+A modern Lavalink v4 / NodeLink v3 wrapper designed for Py-cord and Discord.py.
 Based on the original Pomice library by cloudwithax.
 
 This version has been completely refactored to work with Lavalink v4,

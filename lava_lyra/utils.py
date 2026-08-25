@@ -18,6 +18,7 @@ __all__ = (
     "NodeStats",
     "Ping",
     "RouteStats",
+    "voice_field",
 )
 
 
@@ -69,7 +70,7 @@ class ExponentialBackoff:
 
 class NodeStats:
     """The base class for the node stats object.
-    Gives critical information on the node, which is updated every minute.
+    Gives critical information on the node, which is updated every 60 seconds on Lavalink or every 30 seconds on NodeLink.
     """
 
     __slots__ = (
@@ -95,7 +96,7 @@ class NodeStats:
         cpu: dict[str, Any] = data.get("cpu") or {}
         self.cpu_cores = cpu.get("cores")
         self.cpu_system_load = cpu.get("systemLoad")
-        self.cpu_process_load = cpu.get("lavalinkLoad")
+        self.cpu_process_load = cpu.get("lavalinkLoad", cpu.get("nodelinkLoad"))
 
         self.players_active = data.get("playingPlayers") or 0
         self.players_total = data.get("players") or 0
@@ -115,7 +116,7 @@ class FailingIPBlock:
     __slots__ = ("address", "failing_time")
 
     def __init__(self, data: dict[str, Any]) -> None:
-        self.address = data.get("address")
+        self.address = data.get("failingAddress")
         self.failing_time = datetime.fromtimestamp(
             float(data.get("failingTimestamp") or 0) / 1000,
             tz=UTC,
@@ -179,9 +180,6 @@ class Ping:
     def __init__(self, host: str, port: int, timeout: int = 5) -> None:
         self.timer = self.Timer()
 
-        self._successed = 0
-        self._failed = 0
-        self._conn_time: float | None = None
         self._host = host
         self._port = port
         self._timeout = timeout
@@ -249,9 +247,6 @@ class Ping:
                 pass
             return -1.0
 
-    def ping(self) -> float:
-        return self.get_ping()
-
 
 class LavalinkVersion(NamedTuple):
     major: int
@@ -267,12 +262,6 @@ class LavalinkVersion(NamedTuple):
             (self.major == other.major) and (self.minor == other.minor) and (self.fix == other.fix)
         )
 
-    def __ne__(self, other: object) -> bool:
-        if not isinstance(other, LavalinkVersion):
-            return NotImplemented
-
-        return not (self == other)
-
     @override
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, LavalinkVersion):
@@ -286,13 +275,6 @@ class LavalinkVersion(NamedTuple):
             return NotImplemented
 
         return (self.major, self.minor, self.fix) > (other.major, other.minor, other.fix)
-
-    @override
-    def __le__(self, other: object) -> bool:
-        if not isinstance(other, LavalinkVersion):
-            return NotImplemented
-
-        return (self < other) or (self == other)
 
     @override
     def __ge__(self, other: object) -> bool:
@@ -312,7 +294,6 @@ class ConnectionQualityTracker:
         "_connection_start_time",
         "_consecutive_failures",
         "_failure_start_time",
-        "_last_reconnection_time",
         "_latency_samples",
         "_max_latency_samples",
         "_reconnection_count",
@@ -321,7 +302,6 @@ class ConnectionQualityTracker:
 
     def __init__(self, max_latency_samples: int = 10) -> None:
         self._reconnection_count: int = 0
-        self._last_reconnection_time: float = 0.0
         self._connection_start_time: float = time.time()
         self._total_downtime: float = 0.0
         self._latency_samples: list[float] = []
@@ -337,7 +317,6 @@ class ConnectionQualityTracker:
             self._failure_start_time = 0.0
 
         self._reconnection_count += 1
-        self._last_reconnection_time = current_time
 
     def record_connection_success(self) -> None:
         """Record a successful connection."""
@@ -409,20 +388,15 @@ class NodeHealthMonitor:
         "_circuit_open",
         "_circuit_open_time",
         "_circuit_timeout",
-        "_health_check_interval",
-        "_last_health_check",
         "_quality_tracker",
     )
 
     def __init__(
         self,
-        health_check_interval: float = 30.0,
         circuit_breaker_threshold: int = 5,
         circuit_timeout: float = 60.0,
     ) -> None:
         self._quality_tracker = ConnectionQualityTracker()
-        self._last_health_check: float = 0.0
-        self._health_check_interval: float = health_check_interval
         self._circuit_breaker_threshold: int = circuit_breaker_threshold
         self._circuit_open: bool = False
         self._circuit_open_time: float = 0.0
@@ -445,7 +419,12 @@ class NodeHealthMonitor:
         return self._circuit_open
 
     def check_circuit_breaker(self) -> None:
-        """Check and update circuit breaker state."""
+        """Open the circuit breaker if consecutive failures reached the threshold.
+
+        This can only open the circuit, never close it — closing happens via
+        `record_success()`, or lazily the next time `is_circuit_open` is read
+        after `circuit_timeout` has elapsed.
+        """
         if self._quality_tracker.consecutive_failures >= self._circuit_breaker_threshold:
             if not self._circuit_open:
                 self._circuit_open = True
@@ -516,14 +495,6 @@ class NodeHealthMonitor:
         )
 
         return health_score
-
-    def should_health_check(self) -> bool:
-        """Determine if a health check should be performed."""
-        current_time = time.time()
-        if current_time - self._last_health_check >= self._health_check_interval:
-            self._last_health_check = current_time
-            return True
-        return False
 
 
 def voice_field(data: Any, key: str) -> Any:

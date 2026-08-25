@@ -5,7 +5,6 @@ __all__ = (
     "LavalinkVersionIncompatible",
     "LyraException",
     "NoNodesAvailable",
-    "NodeConnectionClosed",
     "NodeConnectionFailure",
     "NodeCreationError",
     "NodeException",
@@ -15,12 +14,8 @@ __all__ = (
     "QueueEmpty",
     "QueueException",
     "QueueFull",
-    "RequirementNotFound",
     "TrackInvalidPosition",
     "TrackLoadError",
-    # Removed in v4: Platform-specific client exceptions
-    # "InvalidSpotifyClientAuthorization",
-    # "AppleMusicNotEnabled",
 )
 
 
@@ -38,10 +33,6 @@ class NodeCreationError(NodeException):
 
 class NodeConnectionFailure(NodeException):
     """There was a problem while connecting to the node."""
-
-
-class NodeConnectionClosed(NodeException):
-    """The node's connection is closed."""
 
 
 class NodeRestException(NodeException):
@@ -97,31 +88,9 @@ class QueueEmpty(QueueException):
 class LavalinkVersionIncompatible(LyraException):
     """Lavalink version is incompatible.
 
-    Lyra v3.0+ requires Lavalink v4.0 or higher.
-    For Lavalink v3.x support, use an older version of Lyra.
-    """
-
-
-class RequirementNotFound(LyraException):
-    """Couldn't found any of discord packages.
-
-    Neither discord.py nor py-cord could be found.
-    Please install one of them before using.
+    Lyra requires Lavalink v4.2.0+ or NodeLink v3.2.0+. Lavalink v3.x is not supported.
     """
 
 
 class NodelinkExclusive(LyraException):
     """Exception raised when using a Nodelink exclusive feature on a Lavalink instance."""
-
-
-# Platform-specific exceptions have been removed in v4
-# These are no longer needed as all platform support is handled
-# by server-side plugins with their own configuration
-
-# class InvalidSpotifyClientAuthorization(LyraException):
-#     """No Spotify client authorization was provided for track searching."""
-#     pass
-
-# class AppleMusicNotEnabled(LyraException):
-#     """An Apple Music Link was passed in when Apple Music functionality was not enabled."""
-#     pass

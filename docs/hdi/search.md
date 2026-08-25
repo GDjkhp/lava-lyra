@@ -28,7 +28,7 @@ await NodePool.create_node(
 `Node` does not expose a `SearchManager` as a public property. Instead, `Node` provides a `load_search()` convenience method that wraps `SearchManager.load_search()`:
 
 ```py
-node = await NodePool.get_node(identifier="MAIN")
+node = NodePool.get_node(identifier="MAIN")
 result = await node.load_search(query="...", types=[...])
 ```
 
@@ -36,12 +36,12 @@ You can also check whether search is enabled for a node via `Node.search_enabled
 
 ## Performing a search
 
-Use `SearchManager.load_search()` to run a rich search query:
+Use `Node.load_search()` to run a rich search query:
 
 ```py
 from lava_lyra import LavaSearchType, SearchType
 
-result = await search_manager.load_search(
+result = await node.load_search(
     query="architects animals",
     types=[LavaSearchType.TRACK, LavaSearchType.ALBUM],
     search_type=SearchType.ytsearch,
@@ -75,8 +75,15 @@ if result:
   - The search platform to use (e.g. `ytsearch`, `spsearch`, `scsearch`). Uses the server default if not provided.
 
 * - `ctx`
-  - `Optional[Context]`
+  - `ContextType | None`
   - Optional Discord context to attach to result tracks.
+
+:::
+
+:::{important}
+
+Raises `NodeRestException` if the LavaSearch plugin is not installed on the node or the request
+fails, and `ValueError` if `types` is empty.
 
 :::
 
@@ -107,7 +114,7 @@ if result:
 
 ## The SearchResult object
 
-`load_search()` returns a `SearchResult` object with the following attributes:
+`load_search()` returns a `SearchResult` object, or `None` if the search yielded no results, with the following attributes:
 
 :::{list-table}
 :header-rows: 1
@@ -142,6 +149,35 @@ if result:
 
 :::
 
+## The Text object
+
+Each entry in `SearchResult.texts` is a `Text` object, a text-based search suggestion
+returned by the LavaSearch plugin (not a playable track).
+
+:::{list-table}
+:header-rows: 1
+
+* - Attribute
+  - Type
+  - Description
+
+* - `text`
+  - `str`
+  - The suggested search text.
+
+* - `plugin_info`
+  - `dict`
+  - Raw plugin metadata for this suggestion.
+
+:::
+
+`str(text_result)` returns the suggestion text directly, so you can print or send it as-is:
+
+```py
+for suggestion in result.texts:
+    print(suggestion)
+```
+
 ## Example: search and play the first result
 
 ```py
@@ -156,7 +192,7 @@ async def search(self, ctx, *, query: str):
     player = ctx.voice_client
     node = player.node
 
-    result = await node.search.load_search(
+    result = await node.load_search(
         query=query,
         types=[LavaSearchType.TRACK],
         search_type=SearchType.ytsearch,
@@ -175,7 +211,7 @@ async def search(self, ctx, *, query: str):
 ## Example: search Spotify for a track and album
 
 ```py
-result = await node.search.load_search(
+result = await node.load_search(
     query="metallica",
     types=[LavaSearchType.TRACK, LavaSearchType.ALBUM, LavaSearchType.ARTIST],
     search_type=SearchType.spsearch,
@@ -194,7 +230,7 @@ if result:
 :::{note}
 
 Albums, artists, and playlists returned by `load_search()` do not include their full track
-lists — only the metadata. Use `Node.get_tracks()` with the playlist URL to load the full
-contents of an album or playlist.
+lists — only the metadata, and `.uri` is `None` on these entries. There is currently no way
+to load the full contents of an album or playlist from a `load_search()` result.
 
 :::

@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lava-lyra"
 dynamic = ["version"]
-description = "A modern Lavalink v4 wrapper supporting both py-cord and discord.py, based on Pomice"
+description = "A modern Lavalink v4 and NodeLink v3 wrapper supporting both Py-cord and Discord.py, based on Pomice"
 readme = "README.md"
 license = {text = "GPL-3.0"}
 authors = [
     {name = "ParrotXray"},
 ]
-keywords = ["discord", "lavalink", "py-cord", "music", "audio", "lavalink4", "voice", "streaming"]
+keywords = ["discord", "lavalink", "nodelink", "py-cord", "discord.py", "music", "audio", "lavalink4", "voice", "streaming"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Framework :: AsyncIO",
@@ -49,9 +49,9 @@ unused-ignore = "warn"
 
 [project.optional-dependencies]
 py-cord = [
-    "py-cord[voice]>=2.6.0",
+    "py-cord[voice]>=2.8.0",
 ]
-discordpy = [
+"discord.py" = [
     "discord.py[voice]>=2.6.0",
 ]
 docs = [
@@ -75,7 +75,6 @@ Homepage = "https://github.com/ParrotXray/lava-lyra"
 Repository = "https://github.com/ParrotXray/lava-lyra"
 "Issue Tracker" = "https://github.com/ParrotXray/lava-lyra/issues"
 Source = "https://github.com/ParrotXray/lava-lyra"
-Changelog = "https://github.com/ParrotXray/lava-lyra/blob/main/CHANGELOG.md"
 "Original Pomice" = "https://github.com/cloudwithax/pomice"
 
 [tool.setuptools]

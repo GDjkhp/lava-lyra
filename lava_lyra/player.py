@@ -28,7 +28,7 @@ from .exceptions import (
     TrackLoadError,
 )
 from .filters import Filter, Timescale
-from .lyrics import LyricsManager
+from .lyrics import LyricLine, Lyrics, LyricsManager
 from .objects import Playlist, Track
 from .pool import Node, NodePool
 from .utils import LavalinkVersion, voice_field
@@ -75,6 +75,10 @@ class Filters:
             raise FilterTagAlreadyInUse(
                 "A filter with that tag is already in use.",
             )
+        if any(f for f in self._filters if type(f) is type(filter)):
+            raise FilterTagAlreadyInUse(
+                "A filter of that type is already applied.",
+            )
         self._filters.append(filter)
 
     def remove_filter(self, *, filter_tag: str) -> None:
@@ -107,13 +111,12 @@ class Filters:
                     raise FilterInvalidArgument(
                         "Edited filter is not the same type as the current filter.",
                     )
-                if self._filters[index] == to_apply:
-                    raise FilterInvalidArgument("Edited filter is the same as the current filter.")
-
                 if to_apply.tag != filter_tag:
                     raise FilterInvalidArgument(
                         "Edited filter tag is not the same as the current filter tag.",
                     )
+                if self._filters[index] == to_apply:
+                    raise FilterInvalidArgument("Edited filter is the same as the current filter.")
 
                 self._filters[index] = to_apply
 
@@ -133,12 +136,28 @@ class Filters:
         """Get all preloaded filters"""
         return [f for f in self._filters if f.preload == True]
 
-    def get_all_payloads(self) -> dict[str, Any]:
+    def get_all_payloads(self, node: Node | None = None) -> dict[str, Any]:
         """Returns a formatted dict of all the filter payloads"""
         payload: dict[str, Any] = {}
         for _filter in self._filters:
             if _filter.payload:
                 payload.update(_filter.payload)
+
+        if (
+            node
+            and node._is_nodelink
+            and node._version >= LavalinkVersion(3, 7, 0)
+            and "compressor" in payload
+        ):
+            compressor = dict(payload["compressor"])
+            if "gain" in compressor:
+                compressor["makeupGain"] = compressor.pop("gain")
+            if "attack" in compressor:
+                compressor["attack"] = compressor["attack"] / 1000
+            if "release" in compressor:
+                compressor["release"] = compressor["release"] / 1000
+            payload["compressor"] = compressor
+
         return payload
 
     def get_filters(self) -> list[Filter]:
@@ -148,10 +167,9 @@ class Filters:
 
 class Player(VoiceProtocolType):
     """The base player class for Lyra.
-    In order to initiate a player, you must pass it in as a cls when you connect to a channel.
-    i.e: ```py
-    await ctx.author.voice.channel.connect(cls=lyra.Player)
-    ```
+    In order to initiate a player, you must pass it in as a cls when you connect to a channel::
+
+        await ctx.author.voice.channel.connect(cls=lava_lyra.Player)
     """
 
     __slots__ = (
@@ -162,7 +180,6 @@ class Player(VoiceProtocolType):
         "_guild",
         "_is_connected",
         "_last_position",
-        "_last_update",
         "_last_update_local",
         "_log",
         "_lyrics_manager",
@@ -170,19 +187,11 @@ class Player(VoiceProtocolType):
         "_node",
         "_paused",
         "_player_endpoint_uri",
-        "_should_reconnect",
         "_voice_state",
         "_volume",
         "channel",
         "client",
     )
-
-    def __call__(self, client: BotType, channel: VoiceChannelType) -> Player:
-        self.client = client
-        self.channel = channel
-        self._guild = channel.guild
-
-        return self
 
     def __init__(
         self,
@@ -203,10 +212,8 @@ class Player(VoiceProtocolType):
         self._volume: int = 100
         self._paused: bool = False
         self._is_connected: bool = False
-        self._should_reconnect: bool = False
 
         self._last_position: int = 0
-        self._last_update: float = 0
         self._last_update_local: float = 0
         self._ending_track: Track | None = None
         self._next_track: Track | None = None
@@ -223,7 +230,7 @@ class Player(VoiceProtocolType):
         )
 
     @property
-    def position(self) -> float:
+    def position(self) -> int:
         """Property which returns the player's position in a track in milliseconds"""
         current = self._current
         if not self.is_playing or current is None:
@@ -262,11 +269,17 @@ class Player(VoiceProtocolType):
         if not self.is_playing or current is None:
             return 0
 
+        if current.original:
+            current = current.original
+
         return current.length / self.rate
 
     @property
     def is_playing(self) -> bool:
-        """Property which returns whether or not the player is actively playing a track."""
+        """Property which returns whether or not the player has a track loaded and connected.
+
+        This stays True while paused — use `Player.is_paused` to check for that separately.
+        """
         return self._is_connected and self._current is not None
 
     @property
@@ -276,7 +289,11 @@ class Player(VoiceProtocolType):
 
     @property
     def is_paused(self) -> bool:
-        """Property which returns whether or not the player has a track which is paused or not."""
+        """Property which returns whether or not the player is paused.
+
+        This only checks the connection and paused state, not whether a
+        track is currently loaded — see `Player.current` for that.
+        """
         return self._is_connected and self._paused
 
     @property
@@ -317,7 +334,7 @@ class Player(VoiceProtocolType):
         return self.guild.id not in self._node._players
 
     @property
-    def lyrics(self):
+    def lyrics(self) -> Lyrics | None:
         """Get the current track's lyrics"""
         return self._lyrics_manager.lyrics
 
@@ -331,25 +348,34 @@ class Player(VoiceProtocolType):
         """Check if lyrics have been attempted to load"""
         return self._lyrics_manager.lyrics_loaded
 
+    @property
+    def is_subscribed(self) -> bool:
+        """Check if subscribed to live lyrics"""
+        return self._lyrics_manager.is_subscribed
+
     # Lyrics-related methods (acting as proxies to LyricsManager)
     async def fetch_lyrics(
         self,
         track: Track | None = None,
         skip_track_source: bool = False,
         lang: str | None = None,
-    ):
+    ) -> Lyrics | None:
         """Fetch lyrics"""
         return await self._lyrics_manager.fetch_lyrics(track, skip_track_source, lang=lang)
 
     async def subscribe_lyrics(self, skip_track_source: bool = False) -> bool:
-        """Subscribe to live lyrics"""
+        """Subscribe to live lyrics
+
+        Args:
+            skip_track_source: Skip track source when searching
+        """
         return await self._lyrics_manager.subscribe_lyrics(skip_track_source)
 
     async def unsubscribe_lyrics(self) -> bool:
         """Unsubscribe from live lyrics"""
         return await self._lyrics_manager.unsubscribe_lyrics()
 
-    def get_current_lyrics_lines(self, range_seconds: float = 5.0):
+    def get_current_lyrics_lines(self, range_seconds: float = 5.0) -> list[LyricLine]:
         """Get lyric lines near the current playback position"""
         return self._lyrics_manager.get_current_lyrics_lines(range_seconds)
 
@@ -359,7 +385,7 @@ class Player(VoiceProtocolType):
 
     def _adjust_end_time(self) -> str | int | None:
         if self._node._version >= LavalinkVersion(4, 0, 0) or (
-            self._node._is_nodelink and self._node._version >= LavalinkVersion(3, 0, 0)
+            self._node._is_nodelink and self._node._version >= LavalinkVersion(3, 2, 0)
         ):
             return None
 
@@ -367,7 +393,6 @@ class Player(VoiceProtocolType):
 
     async def _update_state(self, data: dict[str, Any]) -> None:
         state: dict[str, Any] = data.get("state", {})
-        self._last_update = int(state.get("time", 0))
         self._last_update_local = time.time() * 1000
         self._is_connected = bool(state.get("connected"))
         self._last_position = int(state.get("position", 0))
@@ -453,7 +478,7 @@ class Player(VoiceProtocolType):
         if self._log:
             self._log.debug(f"Dispatched event {data['type']} to player.")
 
-    async def _refresh_endpoint_uri(self, session_id: str | None) -> None:
+    def _refresh_endpoint_uri(self, session_id: str | None) -> None:
         if session_id:
             old_uri = self._player_endpoint_uri
             self._player_endpoint_uri = f"sessions/{session_id}/players"
@@ -474,7 +499,9 @@ class Player(VoiceProtocolType):
                 "track": {"encoded": self.current.track_id},
                 "volume": self._volume,
                 "paused": self._paused,
-                "filters": self.filters.get_all_payloads() if not self.filters.empty else None,
+                "filters": self.filters.get_all_payloads(self._node)
+                if not self.filters.empty
+                else None,
             }
 
         self._node._players.pop(self._guild.id, None)
@@ -483,7 +510,7 @@ class Player(VoiceProtocolType):
         self._node = new_node
         self._node._players[self._guild.id] = self
 
-        await self._refresh_endpoint_uri(new_node._session_id)
+        self._refresh_endpoint_uri(new_node._session_id)
 
         await self._dispatch_voice_update()
 
@@ -518,9 +545,10 @@ class Player(VoiceProtocolType):
     ) -> list[Track] | Playlist | None:
         """Fetches tracks from the node's REST api to parse into Lavalink.
 
-        If you passed in Spotify API credentials when you created the node,
-        you can also pass in a Spotify URL of a playlist, album or track and it will be parsed
-        accordingly.
+        In Lavalink v4, all platform support is handled by server-side plugins.
+        Spotify, Apple Music, Deezer, etc. URLs are passed directly to Lavalink
+        which uses plugins like LavaSrc to handle them — no credentials are
+        needed in Lyra itself.
 
         You can pass in a discord.py Context object to get a
         Context object on any track you search.
@@ -547,9 +575,10 @@ class Player(VoiceProtocolType):
         ctx: ContextType | None = None,
     ) -> list[Track] | Playlist | None:
         """
-        Gets recommendations from either YouTube or Spotify.
-        You can pass in a discord.py Context object to get a
-        Context object on all tracks that get recommended.
+        Gets recommendations for a track. Supported for Spotify, Deezer, Tidal, JioSaavn, and
+        YouTube/YouTube Music tracks — requires the appropriate plugin on Lavalink servers. Raises
+        `TrackLoadError` for unsupported sources. You can pass in a discord.py Context
+        object to get a Context object on all tracks that get recommended.
         """
         return await self._node.get_recommendations(track=track, ctx=ctx)
 
@@ -576,7 +605,9 @@ class Player(VoiceProtocolType):
             raise NodelinkExclusive(
                 "This is a Nodelink-exclusive feature and is not supported on a Lavalink instance"
             )
-        self._current = None
+        if not gapless:
+            self._current = None
+        self._next_track = None
         await self._node.send(
             method="PATCH",
             path=self._player_endpoint_uri,
@@ -602,9 +633,8 @@ class Player(VoiceProtocolType):
         try:
             await self.disconnect()
         except AttributeError:
-            # 'NoneType' has no attribute '_get_voice_client_key' raised by self.cleanup() ->
-            # assume we're already disconnected and cleaned up
-            assert self.channel is None and not self.is_connected
+            if self.channel is not None or self.is_connected:
+                raise
 
         self._node._players.pop(self.guild.id, None)
         if self.node.is_connected:
@@ -626,15 +656,12 @@ class Player(VoiceProtocolType):
         ignore_if_playing: bool = False,
         gapless: bool = False,
     ) -> Track | None:
-        """Plays a track. If a Spotify track is passed in, it will be handled accordingly."""
+        """Plays a track. If a Spotify or Apple Music track is passed in, it will be handled accordingly."""
 
         if gapless and not self._node._is_nodelink:
             raise NodelinkExclusive(
                 "This is a Nodelink-exclusive feature and is not supported on a Lavalink instance"
             )
-
-        if not track._search_type:
-            track.original = track
 
         if not self._node._available or not self._node._session_id:
             if self._log:
@@ -712,45 +739,25 @@ class Player(VoiceProtocolType):
                     "endTime": end if end > 0 else self._adjust_end_time(),
                 }
 
-        # Reset lyrics state when playing a new track
-        self._reset_lyrics()
-
-        # Lets set the current track before we play it so any
-        # corresponding events can capture it correctly
+        if not gapless:
+            self._reset_lyrics()
 
         if gapless:
             self._next_track = track
-        else:
+        elif not (ignore_if_playing and self.is_playing):
             self._current = track
 
             self._last_position = start
-            self._last_update = time.time() * 1000
             self._last_update_local = time.time() * 1000
 
-        # Remove preloaded filters if last track had any
-        if self.filters.has_preload:
-            for filter in self.filters.get_preload_filters():
-                await self.remove_filter(filter_tag=filter.tag)
+        if not gapless:
+            if self.filters.has_preload:
+                for filter in self.filters.get_preload_filters():
+                    await self.remove_filter(filter_tag=filter.tag)
 
-        # Global filters take precedence over track filters
-        # So if no global filters are detected, lets apply any
-        # necessary track filters
-
-        # Check if theres no global filters and if the track has any filters
-        # that need to be applied
-
-        if track.filters and not self.filters.has_global:
-            # Now apply all filters
-            for filter in track.filters:
-                await self.add_filter(_filter=filter)
-
-        # Lavalink v3.7.5 changed the way the end time parameter works
-        # so now the end time cannot be zero.
-        # If it isnt zero, it'll be set to None.
-        # Otherwise, it'll be set here:
-
-        # if end > 0:
-        #     data["endTime"] = end
+            if track.filters and not self.filters.has_global:
+                for filter in track.filters:
+                    await self.add_filter(_filter=filter)
 
         try:
             await self._node.send(
@@ -813,7 +820,7 @@ class Player(VoiceProtocolType):
                 raise
 
     async def seek(self, position: float) -> float:
-        """Seeks to a position in the currently playing track milliseconds"""
+        """Seeks to a position, in milliseconds, in the currently playing track."""
         if not self._current or not self._current.original:
             return 0.0
 
@@ -822,11 +829,15 @@ class Player(VoiceProtocolType):
                 "Seek position must be between 0 and the track length",
             )
 
+        position = int(position)
         await self._send_player_request({"position": position})
+
+        self._last_position = position
+        self._last_update_local = time.time() * 1000
 
         if self._log:
             self._log.debug(f"Seeking to {position}.")
-        return self.position
+        return float(self.position)
 
     async def set_pause(self, pause: bool) -> bool:
         """Sets the pause state of the currently playing track."""
@@ -838,7 +849,7 @@ class Player(VoiceProtocolType):
         return self._paused
 
     async def set_volume(self, volume: int) -> int:
-        """Sets the volume of the player as an integer. Lavalink accepts values from 0 to 500."""
+        """Sets the volume of the player as an integer. Lavalink accepts values from 0 to 1000."""
         await self._send_player_request({"volume": volume})
         self._volume = volume
 
@@ -856,7 +867,7 @@ class Player(VoiceProtocolType):
         await self._dispatch_voice_update()
 
     async def add_filter(self, _filter: Filter, fast_apply: bool = False) -> Filters:
-        """Adds a filter to the player. Takes a lyra.Filter object.
+        """Adds a filter to the player. Takes a lava_lyra.Filter object.
         This will only work if you are using a version of Lavalink that supports filters.
         If you would like for the filter to apply instantly, set the `fast_apply` arg to `True`.
 
@@ -864,13 +875,8 @@ class Player(VoiceProtocolType):
         """
 
         self._filters.add_filter(filter=_filter, node=self._node)
-        payload = self._filters.get_all_payloads()
-        await self._node.send(
-            method="PATCH",
-            path=self._player_endpoint_uri,
-            guild_id=self._guild.id,
-            data={"filters": payload},
-        )
+        payload = self._filters.get_all_payloads(self._node)
+        await self._send_player_request({"filters": payload})
 
         if self._log:
             self._log.debug(f"Filter has been applied to player with tag {_filter.tag}")
@@ -890,13 +896,8 @@ class Player(VoiceProtocolType):
         """
 
         self._filters.remove_filter(filter_tag=filter_tag)
-        payload = self._filters.get_all_payloads()
-        await self._node.send(
-            method="PATCH",
-            path=self._player_endpoint_uri,
-            guild_id=self._guild.id,
-            data={"filters": payload},
-        )
+        payload = self._filters.get_all_payloads(self._node)
+        await self._send_player_request({"filters": payload})
         if self._log:
             self._log.debug(f"Filter has been removed from player with tag {filter_tag}")
         if fast_apply:
@@ -923,13 +924,8 @@ class Player(VoiceProtocolType):
         """
 
         self._filters.edit_filter(filter_tag=filter_tag, to_apply=edited_filter, node=self._node)
-        payload = self._filters.get_all_payloads()
-        await self._node.send(
-            method="PATCH",
-            path=self._player_endpoint_uri,
-            guild_id=self._guild.id,
-            data={"filters": payload},
-        )
+        payload = self._filters.get_all_payloads(self._node)
+        await self._send_player_request({"filters": payload})
         if self._log:
             self._log.debug(f"Filter with tag {filter_tag} has been edited to {edited_filter!r}")
         if fast_apply:
@@ -940,9 +936,10 @@ class Player(VoiceProtocolType):
         return self._filters
 
     async def reset_filters(self, *, fast_apply: bool = False) -> None:
-        """Resets all currently applied filters to their default parameters.
-         You must have filters applied in order for this to work.
-         If you would like the filters to be removed instantly, set the `fast_apply` arg to `True`.
+        """Removes all currently applied filters entirely (not reset to their defaults — use
+        `Filter.reset()` per-filter if that's what you want).
+        You must have filters applied in order for this to work.
+        If you would like the filters to be removed instantly, set the `fast_apply` arg to `True`.
 
         (You must have a song playing in order for `fast_apply` to work.)
         """
@@ -952,12 +949,7 @@ class Player(VoiceProtocolType):
                 "You must have filters applied first in order to use this method.",
             )
         self._filters.reset_filters()
-        await self._node.send(
-            method="PATCH",
-            path=self._player_endpoint_uri,
-            guild_id=self._guild.id,
-            data={"filters": {}},
-        )
+        await self._send_player_request({"filters": {}})
         if self._log:
             self._log.debug("All filters have been removed from player.")
 

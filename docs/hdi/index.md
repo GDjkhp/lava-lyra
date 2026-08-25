@@ -15,4 +15,5 @@ queue.md
 events.md
 lyrics.md
 search.md
+objects.md
 ```

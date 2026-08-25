@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import re
-from enum import Enum, IntEnum
-from typing import ClassVar, override
+from enum import Enum
+from typing import override
 
 __all__ = (
     "LavaSearchType",
-    "LogLevel",
     "LoopMode",
     "MixEndReason",
     "NodeAlgorithm",
@@ -21,9 +20,9 @@ __all__ = (
 
 class SearchType(Enum):
     """
-    The enum for the different search types for Lyra.
-    This feature is exclusively for the Spotify search feature of Lyra.
-    If you are not using this feature, this class is not necessary.
+    The enum for the different search/recommendation prefixes Lavalink search plugins
+    understand. Used as the `search_type` param on `Node.get_tracks()` / `Player.get_tracks()`
+    / `Node.load_search()` for any source, not just Spotify.
 
     SearchType.ytsearch searches using regular Youtube,
     which is best for all scenarios.
@@ -33,6 +32,11 @@ class SearchType(Enum):
 
     SearchType.scsearch searches using SoundCloud,
     which is an alternative to YouTube or YouTube Music.
+
+    SearchType.amsearch/spsearch/bilisearch search Apple Music, Spotify, and Bilibili
+    respectively. SearchType.sprec/dzrec/tdrec/jsrec request recommendations from Spotify,
+    Deezer, Tidal, and JioSaavn respectively — used internally by `get_recommendations()`.
+    SearchType.other is a passthrough for plugin-defined prefixes not listed here.
     """
 
     ytsearch = "ytsearch"
@@ -138,6 +142,9 @@ class PlaylistType(Enum):
 
     PlaylistType.APPLE_MUSIC defines that the playlist is from Apple Music.
 
+    PlaylistType.BILIBILI/FACEBOOK/INSTAGRAM/YTDLP define the playlist is from Bilibili,
+    Facebook, Instagram, or yt-dlp respectively.
+
     PlaylistType.OTHER defines that the playlist is from an unknown source (possible from 3rd-party plugins).
     """
 
@@ -156,10 +163,6 @@ class PlaylistType(Enum):
     @override
     def _missing_(cls, value: object) -> PlaylistType:
         return cls.OTHER
-
-    @property
-    def none(self) -> None:
-        return None
 
     def __str__(self) -> str:
         return str(self.value)
@@ -262,15 +265,15 @@ class RouteIPType(Enum):
 
 class URLRegex:
     """
-    The enum for all the URL Regexes in use by Lyra.
+    A namespace class holding all the compiled URL regexes used by Lyra.
+
+    URLRegex.BILIBILI_URL returns the Bilibili URL Regex.
 
     URLRegex.SPOTIFY_URL returns the Spotify URL Regex.
 
     URLRegex.DISCORD_MP3_URL returns the Discord MP3 URL Regex.
 
     URLRegex.YOUTUBE_URL returns the Youtube URL Regex.
-
-    URLRegex.YOUTUBE_PLAYLIST returns the Youtube Playlist Regex.
 
     URLRegex.YOUTUBE_TIMESTAMP returns the Youtube Timestamp Regex.
 
@@ -281,22 +284,6 @@ class URLRegex:
     URLRegex.BASE_URL returns the standard URL Regex.
 
     """
-
-    YTDLP_SUPPORTED_URLS: ClassVar[list[re.Pattern[str]]] = [
-        # Bilibili
-        # re.compile(r"https?://(?:www\.)?bilibili\.com/video/[a-zA-Z0-9]+"),
-        # re.compile(r"https?://b23\.tv/[a-zA-Z0-9]+"),
-        # re.compile(r"https?://(?:m\.)?bilibili\.com/video/[a-zA-Z0-9]+"),
-        # Facebook
-        re.compile(r"https?://(?:www\.)?facebook\.com/.*/videos/\d+"),
-        re.compile(r"https?://(?:www\.)?facebook\.com/watch/\?v=\d+"),
-        re.compile(r"https?://fb\.watch/[a-zA-Z0-9_-]+"),
-        re.compile(r"https?://(?:www\.)?facebook\.com/share/v/[a-zA-Z0-9]+"),
-        re.compile(r"https?://(?:www\.)?facebook\.com/reel/\d+"),
-        re.compile(r"https?://(?:www\.)?facebook\.com/(?:watch|video).*[?&]v=\d+"),
-        # Instagram
-        re.compile(r"https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[a-zA-Z0-9_-]+"),
-    ]
 
     BILIBILI_URL = re.compile(
         r"^https?://(?:(?:www|m)\.)?(?:bilibili\.com|b23\.tv)/(?P<type>video|audio)/(?P<id>(?:(?P<audioType>am|au|av)?(?P<audioId>[0-9]+))|[A-Za-z0-9]+)/?(?:\?.*)?$"
@@ -316,10 +303,6 @@ class URLRegex:
         r"(\/(?:[\w\-]+\?v=|embed\/|v\/)?)([\w\-]+)(\S+)?$",
     )
 
-    YOUTUBE_PLAYLIST_URL = re.compile(
-        r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube\.com|youtu.be))/playlist\?list=.*",
-    )
-
     YOUTUBE_TIMESTAMP = re.compile(
         r"(?P<video>^.*?)(\?t|&t|&start)=(?P<time>\d+)?.*",
     )
@@ -329,60 +312,11 @@ class URLRegex:
         r"(?P<type>album|playlist|song|artist)/(?P<name>.+?)/(?P<id>[^/?]+?)(?:/)?(?:\?.*)?$",
     )
 
-    AM_SINGLE_IN_ALBUM_REGEX = re.compile(
-        r"https?://music\.apple\.com/(?P<country>[a-zA-Z]{2})/(?P<type>album|playlist|song|artist)/"
-        r"(?P<name>.+)/(?P<id>[^/?]+)(\?i=)(?P<id2>[^&]+)(?:&.*)?$",
-    )
-
     SOUNDCLOUD_URL = re.compile(
         r"((?:https?:)?\/\/)?((?:www|m)\.)?soundcloud.com\/.*/.*",
     )
 
-    SOUNDCLOUD_PLAYLIST_URL = re.compile(
-        r"^(https?:\/\/)?(www.)?(m\.)?soundcloud\.com\/.*/sets/.*",
-    )
-
-    SOUNDCLOUD_TRACK_IN_SET_URL = re.compile(
-        r"^(https?:\/\/)?(www.)?(m\.)?soundcloud\.com/[a-zA-Z0-9-._]+/[a-zA-Z0-9-._]+(\?in)",
-    )
-
-    LAVALINK_SEARCH = re.compile(r"(?P<type>ytm?|sc)search:")
-
     BASE_URL = re.compile(r"https?://(?:www\.)?.+")
-
-
-class LogLevel(IntEnum):
-    """
-    The enum for specifying the logging level within Lyra.
-    This class serves as shorthand for logging.<level>
-    This enum is exclusively for the logging feature in Lyra.
-    If you are not using this feature, this class is not necessary.
-
-
-    LogLevel.DEBUG sets the logging level to "debug".
-
-    LogLevel.INFO sets the logging level to "info".
-
-    LogLevel.WARN sets the logging level to "warn".
-
-    LogLevel.ERROR sets the logging level to "error".
-
-    LogLevel.CRITICAL sets the logging level to "CRITICAL".
-
-    """
-
-    DEBUG = 10
-    INFO = 20
-    WARN = 30
-    ERROR = 40
-    CRITICAL = 50
-
-    @classmethod
-    def from_str(cls, level_str: str) -> LogLevel:
-        try:
-            return cls[level_str.upper()]
-        except KeyError:
-            raise ValueError(f"No such log level: {level_str}")
 
 
 class LavaSearchType(Enum):
